@@ -2,8 +2,14 @@
 # This parameter can either be a YAML-formatted string or an absolute path to a YAML file
 string config
 
-# File path of the mesh resource
+# File path of the mesh resource, used if mesh_topic is empty
 string mesh_file
+
+# Topic on which a pcl_msgs/PolygonMesh is latched (reliable, transient local), planned on instead of mesh_file if set
+string mesh_topic
+
+# Time to wait for the mesh on mesh_topic, zero to wait indefinitely
+builtin_interfaces/Duration mesh_timeout
 
 # TF frame to which the mesh is relative
 string mesh_frame

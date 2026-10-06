@@ -6,7 +6,10 @@
 #include <noether_tpp/utils.h>
 #include <noether_tpp/plugin_interface.h>
 #include <pcl/io/vtk_lib_io.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl_msgs/msg/polygon_mesh.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/wait_for_message.hpp>
 #include <yaml-cpp/yaml.h>
 
 class ToolPathPlanningServer : public rclcpp::Node
@@ -50,10 +53,8 @@ protected:
       if (!config.IsMap())
         throw std::runtime_error("The request TPP configuration must be a map type: '" + request->config + "'");
 
-      // Load the mesh file
-      pcl::PolygonMesh mesh;
-      if (pcl::io::loadPolygonFile(request->mesh_file, mesh) <= 0)
-        throw std::runtime_error("Failed to load mesh from file: " + request->mesh_file);
+      pcl::PolygonMesh mesh = request->mesh_topic.empty() ? loadMeshFile(request->mesh_file) :
+                                                            receiveMesh(request->mesh_topic, request->mesh_timeout);
 
       // Set the mesh frame from the request
       mesh.header.frame_id = request->mesh_frame;
@@ -74,6 +75,46 @@ protected:
       noether::printException(ex, ss);
       response->message = ss.str();
     }
+  }
+
+  static pcl::PolygonMesh loadMeshFile(const std::string& mesh_file)
+  {
+    pcl::PolygonMesh mesh;
+    if (pcl::io::loadPolygonFile(mesh_file, mesh) <= 0)
+      throw std::runtime_error("Failed to load mesh from file: " + mesh_file);
+    return mesh;
+  }
+
+  /**
+   * Waits for the mesh latched on `mesh_topic`; a zero `timeout` waits indefinitely.
+   *
+   * The subscription is created anew for every request, so it receives the mesh latched last.
+   */
+  pcl::PolygonMesh receiveMesh(const std::string& mesh_topic, const builtin_interfaces::msg::Duration& timeout)
+  {
+    // A callback group no executor spins, so the message is left for wait_for_message to take
+    rclcpp::SubscriptionOptions options;
+    options.callback_group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+    const auto subscription = create_subscription<pcl_msgs::msg::PolygonMesh>(
+        mesh_topic,
+        rclcpp::QoS(1).reliable().transient_local(),
+        [](const std::shared_ptr<const pcl_msgs::msg::PolygonMesh>) {},
+        options);
+
+    const rclcpp::Duration wait_duration(timeout);
+    const auto wait_timeout = wait_duration == rclcpp::Duration(0, 0) ?
+                                  std::chrono::nanoseconds(-1) :
+                                  wait_duration.to_chrono<std::chrono::nanoseconds>();
+    pcl_msgs::msg::PolygonMesh mesh_msg;
+    if (!rclcpp::wait_for_message(mesh_msg, subscription, get_node_base_interface()->get_context(), wait_timeout))
+    {
+      throw std::runtime_error("No mesh received on '" + mesh_topic + "' within " +
+                               std::to_string(wait_duration.seconds()) + " s");
+    }
+
+    pcl::PolygonMesh mesh;
+    pcl_conversions::toPCL(mesh_msg, mesh);
+    return mesh;
   }
 
   rclcpp::Service<noether_ros::srv::PlanToolPath>::SharedPtr server_;

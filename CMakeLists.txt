@@ -14,6 +14,8 @@ find_package(builtin_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(noether_tpp REQUIRED)
 find_package(noether_gui REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(pcl_msgs REQUIRED)
 find_package(pluginlib)
 find_package(rclcpp REQUIRED)
 find_package(rviz_common)
@@ -53,7 +55,15 @@ target_link_libraries(
 
 # Tool path planning server
 add_executable(${PROJECT_NAME}_tool_path_planning_server src/tool_path_planning_server.cpp)
-target_link_libraries(${PROJECT_NAME}_tool_path_planning_server PUBLIC ${PROJECT_NAME}_lib rclcpp::rclcpp yaml-cpp)
+target_link_libraries(
+  ${PROJECT_NAME}_tool_path_planning_server
+  PUBLIC ${PROJECT_NAME}_lib
+         rclcpp::rclcpp
+         yaml-cpp
+         ${pcl_msgs_TARGETS}
+)
+# pcl_conversions is header only and exports no target
+target_include_directories(${PROJECT_NAME}_tool_path_planning_server PRIVATE ${pcl_conversions_INCLUDE_DIRS})
 
 # Located vector Rviz tool
 add_library(${PROJECT_NAME}_located_vector_tool SHARED src/located_vector_rviz_tool.h src/located_vector_rviz_tool.cpp)

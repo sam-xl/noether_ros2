@@ -2,10 +2,16 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node as LaunchNode
 import launch_testing
+from builtin_interfaces.msg import Duration
 from noether_ros.srv import PlanToolPath
 import os
+from pcl_msgs.msg import PolygonMesh, Vertices
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from sensor_msgs.msg import PointField
+from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Header
 import unittest
 
 
@@ -58,6 +64,21 @@ tool_path_modifiers:
   - name: SnakeOrganization
 """
 
+def grid_mesh(size=1.0, cells=20):
+    """Return a flat square mesh in the xy plane, triangulated on a grid of `cells` by `cells`."""
+    step = size / cells
+    points = [(i * step, j * step, 0.0) for j in range(cells + 1) for i in range(cells + 1)]
+    fields = [PointField(name=axis, offset=4 * index, datatype=PointField.FLOAT32, count=1)
+              for index, axis in enumerate("xyz")]
+    mesh = PolygonMesh(cloud=point_cloud2.create_cloud(Header(frame_id="world"), fields, points))
+    for j in range(cells):
+        for i in range(cells):
+            corner = j * (cells + 1) + i
+            mesh.polygons.append(Vertices(vertices=[corner, corner + 1, corner + cells + 2]))
+            mesh.polygons.append(Vertices(vertices=[corner, corner + cells + 2, corner + cells + 1]))
+    return mesh
+
+
 # Active test
 class TestToolPathPlanningClient(unittest.TestCase):
 
@@ -109,3 +130,33 @@ class TestToolPathPlanningClient(unittest.TestCase):
                     self.assertGreaterEqual(len(segment.poses), 1)
 
         self.node.destroy_client(client)
+
+    def call(self, request):
+        client = self.node.create_client(PlanToolPath, 'plan_tool_path')
+        self.assertTrue(client.wait_for_service(timeout_sec=5.0), "Service does not exist")
+        future = client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future)
+        self.node.destroy_client(client)
+        self.assertIsNotNone(future.result(), "No response received")
+        return future.result()
+
+    def test_tool_path_planning_from_topic(self):
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        publisher = self.node.create_publisher(PolygonMesh, 'test_mesh', latched)
+        publisher.publish(grid_mesh())
+
+        request = PlanToolPath.Request(config=config_str, mesh_topic='test_mesh', mesh_timeout=Duration(sec=5))
+        response = self.call(request)
+
+        self.assertTrue(response.success, response.message)
+        self.assertEqual(len(response.tool_paths), 1)
+        self.assertGreaterEqual(len(response.tool_paths[0].tool_paths), 1)
+        self.node.destroy_publisher(publisher)
+
+    def test_tool_path_planning_from_topic_timeout(self):
+        request = PlanToolPath.Request(config=config_str, mesh_topic='nobody_publishes_here',
+                                       mesh_timeout=Duration(sec=1))
+        response = self.call(request)
+
+        self.assertFalse(response.success)
+        self.assertIn("No mesh received on 'nobody_publishes_here'", response.message)

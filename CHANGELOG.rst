@@ -2,6 +2,11 @@
 Changelog for package noether_ros
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Added ``mesh_topic`` and ``mesh_timeout`` to the ``PlanToolPath`` service, to plan on a ``pcl_msgs/PolygonMesh``
+  latched on a topic instead of a mesh file
+
 0.2.0 (2026-01-08)
 ------------------
 * Updated to Noether 0.16 `#8 <https://github.com/marip8/noether_ros2/issues/8>`_ from marip8/update/noether-0.16
